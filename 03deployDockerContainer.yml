@@ -1,0 +1,60 @@
+# Build Container and upload to Docker Hub and then use Azure Containers to host that Container
+
+trigger:
+- master
+
+resources:
+- repo: self
+
+variables:
+  image_name: utsavmaan28/album-backend-api
+  containerapps_app: album-backend-api
+  containerapps_environment: aca-environment
+  resource_group: DevOpsRG
+  tag: '$(Build.BuildId)'
+
+stages:
+- stage: Build
+  displayName: Build and push image
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: myPool
+    steps:
+
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        command: build
+        dockerfile: '$(Build.SourcesDirectory)/03backend_api/backend_api_python/Dockerfile'
+        repository: $(image_name)
+        tags: $(tag)
+
+    - task: Docker@2
+      displayName: Push image to Docker Hub
+      inputs:
+        containerRegistry: 'dockerhub-connection'
+        repository: $(image_name)
+        command: 'push'
+        tags: '$(tag)'
+
+- stage: Deploy
+  displayName: Deploy to Container Apps
+  jobs:
+  - job: Deploy
+    displayName: Deploy
+    pool:
+      name: myPool
+    steps:
+
+    - task: AzureContainerApps@1
+      displayName: Deploy new container version
+      inputs:
+        azureSubscription: 'azure-connection'
+        imageToDeploy: '$(image_name):$(tag)'
+        containerAppName: '$(containerapps_app)'
+        resourceGroup: '$(resource_group)'
+        containerAppEnvironment: '$(containerapps_environment)'
+        targetPort: '3500'
+        ingress: 'external'
