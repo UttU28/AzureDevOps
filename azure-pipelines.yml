@@ -108,9 +108,8 @@ stages:
     - task: PublishBuildArtifacts@1
       displayName: Publish Artifact (WebApp.zip)
       inputs:
-        PathtoPublish: '$(build.artifactstagingdirectory)'
+        PathtoPublish: '$(defaultWorkingDirectory)/$(build.artifactstagingdirectory)'
         ArtifactName: drop
-        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Database
     displayName: Build Database
