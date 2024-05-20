@@ -7,6 +7,9 @@ parameters:
   type: boolean
   default: true
 
+variables:
+  defaultWorkingDirectory: $(System.DefaultWorkingDirectory)/06WebAppWithDatabaseDemo
+
 stages:
 - stage: Build_Stage
   displayName: Build Apps
@@ -27,16 +30,18 @@ stages:
         packageType: sdk
         version: 6.0.x
         installationPath: $(Agent.ToolsDirectory)/dotnet
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Restore Nuget Packages
       inputs:
         command: restore
         projects: '**/WebApp.csproj'
+        workingDirectory: $(defaultWorkingDirectory)
     
-    - task: WhiteSource Bolt@20
-      displayName: Scan Nuget Packages
-      enabled: ${{ parameters.runCompletePipeline }}
+    # - task: WhiteSource Bolt@20
+    #   displayName: Scan Nuget Packages
+    #   enabled: ${{ parameters.runCompletePipeline }}
 
     - task: PowerShell@2
       displayName: Prepare for Sonar Cloud
@@ -56,21 +61,23 @@ stages:
                     $node.AppendChild($child)
                     $doc.Save($path)
                 }
-        workingDirectory: 'WebApp'
+        workingDirectory: $(defaultWorkingDirectory)/WebApp
 
-    - task: SonarCloudPrepare@1
-      displayName: Prepare analysis on SonarCloud
-      enabled: ${{ parameters.runCompletePipeline }}
-      inputs:
-        SonarCloud: SonarCloud
-        organization: houssemdellai
-        projectKey: WebAppWithDatabaseDemo
+    # - task: SonarCloudPrepare@1
+    #   displayName: Prepare analysis on SonarCloud
+    #   enabled: ${{ parameters.runCompletePipeline }}
+    #   inputs:
+    #     SonarCloud: SonarCloud
+    #     organization: houssemdellai
+    #     projectKey: WebAppWithDatabaseDemo
+    #     workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Build WebApp
       inputs:
         projects: '**/WebApp.csproj'
         arguments: '--configuration $(BuildConfiguration)'
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Run Unit Tests
@@ -79,6 +86,7 @@ stages:
         command: test
         projects: '**/*UnitTest*.csproj'
         arguments: '--configuration $(BuildConfiguration)'
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Create WebApp.zip
@@ -87,20 +95,22 @@ stages:
         publishWebProjects: True
         arguments: '--configuration $(BuildConfiguration) --output $(build.artifactstagingdirectory)'
         zipAfterPublish: True
+        workingDirectory: $(defaultWorkingDirectory)
 
-    - task: SonarCloudAnalyze@1
-      displayName: Run Code Analysis
-      enabled: ${{ parameters.runCompletePipeline }}
+    # - task: SonarCloudAnalyze@1
+    #   displayName: Run Code Analysis
+    #   enabled: ${{ parameters.runCompletePipeline }}
 
-    - task: SonarCloudPublish@1
-      displayName: Publish Quality Gate Result
-      enabled: ${{ parameters.runCompletePipeline }}
+    # - task: SonarCloudPublish@1
+    #   displayName: Publish Quality Gate Result
+    #   enabled: ${{ parameters.runCompletePipeline }}
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Artifact (WebApp.zip)
       inputs:
         PathtoPublish: '$(build.artifactstagingdirectory)'
         ArtifactName: drop
+        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Database
     displayName: Build Database
@@ -114,11 +124,13 @@ stages:
       inputs:
         solution: WebApp.Database/WebApp.Database.sqlproj
         msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Artifact (Dacpac)
       inputs:
         ArtifactName: dacpac
+        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Selenium
     displayName: Build UI Tests
@@ -134,17 +146,20 @@ stages:
       displayName: Restoore NuGet Packages
       inputs:
         restoreSolution: WebAppWithDatabase.sln
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: MSBuild@1
       displayName: Build SeleniumUiTests.csproj
       inputs:
         solution: SeleniumUiTests/SeleniumUiTests.csproj
         msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+        workingDirectory: $(defaultWorkingDirectory)
 
     - task: PublishBuildArtifacts@1
       displayName: 'Publish Artifact: UI-Test'
       inputs:
         ArtifactName: ui-tests
+        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Infrastructure
     displayName: Publish Infra files
@@ -162,7 +177,7 @@ stages:
   displayName: Create & Deploy to Dev
   dependsOn: Build_Stage
   variables:
-    azureSubscription: 'WebAppWithDatabaseDemo_spn' # couldn't be referenced
+    azureSubscription: 'azure-connection' # couldn't be referenced
     ResourceGroupName: '$(Prefix)-$(Release.EnvironmentName)-$(UniqueId)-RG'
     Database.Admin: 'houssem'
     Database.Password: '@Aa123456' # to be secured in Key Vault
@@ -193,7 +208,7 @@ stages:
       displayName: Validate ARM templates
       enabled: ${{ parameters.runCompletePipeline }}
       inputs:
-        azureSubscription: 'WebAppWithDatabaseDemo_spn'
+        azureSubscription: 'azure-connection'
         action: 'Create Or Update Resource Group'
         resourceGroupName: '$(ResourceGroupName)'
         location: 'West Europe'
@@ -235,7 +250,7 @@ stages:
       displayName: Preview Template Changes (What-If)
       inputs:
         workingDirectory: $(System.DefaultWorkingDirectory)/arm/
-        azureSubscription: 'WebAppWithDatabaseDemo_spn'
+        azureSubscription: 'azure-connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: 'az deployment group what-if --resource-group $(ResourceGroupName) --name rollout01 --template-file  WebSiteSQLDatabase.json --parameters WebSiteSQLDatabase.parameters.json'
@@ -245,7 +260,7 @@ stages:
       displayName: Deploy ARM templates
       inputs:
         deploymentScope: 'Resource Group'
-        azureResourceManagerConnection: 'WebAppWithDatabaseDemo_spn'
+        azureResourceManagerConnection: 'azure-connection'
         subscriptionId: '4b72ed90-7ca3-4e76-8d0f-31a2c0bee7a3'
         action: 'Create Or Update Resource Group'
         resourceGroupName: '$(ResourceGroupName)'
@@ -261,7 +276,7 @@ stages:
       enabled: ${{ parameters.runCompletePipeline }}
       continueOnError: true
       inputs:
-        ConnectedServiceNameARM: 'WebAppWithDatabaseDemo_spn'
+        ConnectedServiceNameARM: 'azure-connection'
         GenerateMethodParameterSetSelection: 'ResourceGroupName'
         ResourceGroupName: '$(ResourceGroupName)'
         SubscriptionId: '4b72ed90-7ca3-4e76-8d0f-31a2c0bee7a3'
@@ -288,7 +303,7 @@ stages:
     - task: AzureRmWebAppDeployment@3
       displayName: Deploy WebApp to Azure
       inputs:
-        azureSubscription: 'WebAppWithDatabaseDemo_spn'
+        azureSubscription: 'azure-connection'
         appType: 'app'
         WebAppName: '$(WebAppName)'
         Package: '$(System.DefaultWorkingDirectory)/drop/WebApp.zip'
@@ -307,7 +322,7 @@ stages:
     - task: SqlAzureDacpacDeployment@1
       displayName: Deploy DacPac to SQL Azure
       inputs:
-        azureSubscription: 'WebAppWithDatabaseDemo_spn'
+        azureSubscription: 'azure-connection'
         AuthenticationType: 'server'
         ServerName: '$(SqlServerName).database.windows.net,1433'
         DatabaseName: '$(Database.Name)'
