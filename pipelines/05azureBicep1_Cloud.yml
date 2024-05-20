@@ -1,3 +1,4 @@
+<<<<<<< HEAD:pipelines/05azureBicep1_Cloud.yml
 name: Deploy Bicep files $(Build.BuildId)
 
 trigger: 
@@ -11,74 +12,341 @@ variables:
 
 pool:
   vmImage: 'ubuntu-latest'
+=======
+trigger:
+  - none
+  
+parameters:
+- name: runCompletePipeline
+  displayName: Run All Tasks ?
+  type: boolean
+  default: true
+>>>>>>> 92951185cea91f5e7d68da3ad5181df465f0d653:azure-pipelines.yml
 
 stages:
-- stage: preDeploy
+- stage: Build_Stage
+  displayName: Build Apps
   jobs:
-  - job: scanWhatif
-    displayName: scan and run whatif
+
+  - job: WebApp
+    displayName: Build Web App
     pool:
-      vmImage: windows-2022
+      name: Hosted Windows 2019 with VS2019 
+      vmImage: 'windows-2019'
+    variables:
+      BuildConfiguration: release
+    steps:
+
+    - task: UseDotNet@2
+      displayName: Install .NET 6 sdk
+      inputs:
+        packageType: sdk
+        version: 6.0.x
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: DotNetCoreCLI@2
+      displayName: Restore Nuget Packages
+      inputs:
+        command: restore
+        projects: '**/WebApp.csproj'
+    
+    - task: DotNetCoreCLI@2
+      displayName: Build WebApp
+      inputs:
+        projects: '**/WebApp.csproj'
+        arguments: '--configuration $(BuildConfiguration)'
+
+    - task: DotNetCoreCLI@2
+      displayName: Run Unit Tests
+      enabled: ${{ parameters.runCompletePipeline }}
+      inputs:
+        command: test
+        projects: '**/*UnitTest*.csproj'
+        arguments: '--configuration $(BuildConfiguration)'
+
+    - task: DotNetCoreCLI@2
+      displayName: Create WebApp.zip
+      inputs:
+        command: publish
+        publishWebProjects: True
+        arguments: '--configuration $(BuildConfiguration) --output $(build.artifactstagingdirectory)'
+        zipAfterPublish: True
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Artifact (WebApp.zip)
+      inputs:
+        PathtoPublish: '$(build.artifactstagingdirectory)'
+        ArtifactName: drop
+
+  - job: Database
+    displayName: Build Database
+    pool:
+      vmImage: 'windows-2019'
+      demands: msbuild
+    steps:
+
+    - task: MSBuild@1
+      displayName: Build WebApp.Database.sqlproj
+      inputs:
+        solution: WebApp.Database/WebApp.Database.sqlproj
+        msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Artifact (Dacpac)
+      inputs:
+        ArtifactName: dacpac
+
+  - job: Selenium
+    displayName: Build UI Tests
+    pool:
+      vmImage: 'windows-2019'
+      demands: msbuild
 
     steps:
-    
-    - task: RunARMTTKTests@1
-      displayName: Scan Bicep files
+    - task: NuGetToolInstaller@0
+      displayName: Use NuGet 4.3.0
+
+    - task: NuGetCommand@2
+      displayName: Restoore NuGet Packages
       inputs:
-        templatelocation: '$(System.DefaultWorkingDirectory)\04azureBicepWebApp'
-        resultLocation: '$(System.DefaultWorkingDirectory)\results'
+        restoreSolution: WebAppWithDatabase.sln
+
+    - task: MSBuild@1
+      displayName: Build SeleniumUiTests.csproj
+      inputs:
+        solution: SeleniumUiTests/SeleniumUiTests.csproj
+        msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: UI-Test'
+      inputs:
+        ArtifactName: ui-tests
+
+  - job: Infrastructure
+    displayName: Publish Infra files
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: ARM templates'
+      inputs:
+        PathtoPublish: AzureResourceGroupDeployment
+        ArtifactName: arm
+
+- stage: Dev_Stage
+  displayName: Create & Deploy to Dev
+  dependsOn: Build_Stage
+  variables:
+    azureSubscription: 'azure-connection' # couldn't be referenced
+    ResourceGroupName: '$(Prefix)-$(Release.EnvironmentName)-$(UniqueId)-RG'
+    Database.Admin: 'houssem'
+    Database.Password: '@Aa123456' # to be secured in Key Vault
+    Database.Name: 'EmployeesDB'
+    WebAppName: '$(Prefix)-$(Release.EnvironmentName)-$(UniqueId)'
+    WebAppNameUrl: 'https://$(WebAppName).azurewebsites.net/'
+    SqlServerName: '$(Prefix)-sql-$(Release.EnvironmentName)-$(UniqueId)'
+    Prefix: 'tunis'
+    Release.EnvironmentName: 'dev'
+    UniqueId: '1280' #'$(Build.BuildId)'
+    hostingPlanName: '$(Prefix)-service-plan'
+
+  jobs:
+  - job: Create_DEV
+    displayName: Create DEV
+    pool:
+      vmImage: 'windows-2019'
+    steps:
+
+    - checkout: none
+    - task: DownloadBuildArtifacts@0
+      displayName: Download ARM templates
+      inputs:
+        artifactName: arm
+        downloadPath: $(System.DefaultWorkingDirectory)
+
+    - task: AzureResourceGroupDeployment@2
+      displayName: Validate ARM templates
+      enabled: ${{ parameters.runCompletePipeline }}
+      inputs:
+        azureSubscription: 'azure-connection'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(ResourceGroupName)'
+        location: 'West Europe'
+        templateLocation: 'Linked artifact'
+        csmFile: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.json'
+        csmParametersFile: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.parameters.json'
+        overrideParameters: '-hostingPlanName $(hostingPlanName) -skuName "F1" -skuCapacity 1 -administratorLogin $(Database.Admin) -administratorLoginPassword $(Database.Password) -databaseName $(Database.Name) -collation "SQL_Latin1_General_CP1_CI_AS" -edition "Basic" -maxSizeBytes "1073741824" -requestedServiceObjectiveName "Basic" -webSiteName $(WebAppName) -sqlserverName $(SqlServerName)'
+        deploymentMode: 'Validation'
+
+    - task: AzSKARMTemplateChecker@4
+      displayName: Scan ARM templates using AzSK
+      enabled: ${{ parameters.runCompletePipeline }}
+      continueOnError: true
+      inputs:
+        ARMTemplateFilePath: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.json'
+        ARMTemplateParameterFilePath: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.parameters.json'
+
+# scan ARM template using TTK
+
+    - task: RunARMTTKTests@1
+      displayName: Scan ARM templates using TTK
+      inputs:
+        templatelocation: '$(System.DefaultWorkingDirectory)/arm/'
+        resultLocation: '$(System.DefaultWorkingDirectory)/arm/results'
         allTemplatesMain: false
         cliOutputResults: true
         ignoreExitCode: true
+        # includeTests: 'VM Images Should Use Latest Version,Resources Should Have Location'
+        # skipTests: 'VM Images Should Use Latest Version,Resources Should Have Location'
 
     - task: PublishTestResults@2
-      displayName: Publish Results
+      displayName: Publish TTK Test Results
       inputs:
         testResultsFormat: 'NUnit'
-        testResultsFiles: '$(System.DefaultWorkingDirectory)\results\*-armttk.xml'
+        testResultsFiles: '$(System.DefaultWorkingDirectory)\arm\results\*-armttk.xml'
       condition: always()
 
     - task: AzureCLI@2
-      displayName: Preview Bicep Changes
+      displayName: Preview Template Changes (What-If)
       inputs:
+        workingDirectory: $(System.DefaultWorkingDirectory)/arm/
         azureSubscription: 'azure-connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
-        inlineScript: |
-          az --version
-          az group create --name $(resourceGroupName) --location $(location)
-          az deployment group what-if --resource-group $(resourceGroupName) \
-            --template-file $(templateFile) \
-            --parameters webAppName=$(webAppName)
+        inlineScript: 'az deployment group what-if --resource-group $(ResourceGroupName) --name rollout01 --template-file  WebSiteSQLDatabase.json --parameters WebSiteSQLDatabase.parameters.json'
+        arguments: '-hostingPlanName $(hostingPlanName) -skuName "F1" -skuCapacity 1 -administratorLogin $(Database.Admin) -administratorLoginPassword $(Database.Password) -databaseName $(Database.Name) -collation "SQL_Latin1_General_CP1_CI_AS" -edition "Basic" -maxSizeBytes "1073741824" -requestedServiceObjectiveName "Basic" -webSiteName $(WebAppName) -sqlserverName $(SqlServerName)'
 
-- stage: deployBicep
-  jobs:
-
-  - job: waitForValidation
-    displayName: Wait for external validation
-    pool: server
-    timeoutInMinutes: 4320 # job times out in 3 days
-    steps:
-    - task: ManualValidation@0
-      timeoutInMinutes: 1440 # task times out in 1 day
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: Deploy ARM templates
       inputs:
+<<<<<<< HEAD:pipelines/05azureBicep1_Cloud.yml
         notifyUsers: 'uchaudh3@binghamton.edu'
         instructions: 'Please validate the build $(Build.BuildId) configuration and resume'
+=======
+        deploymentScope: 'Resource Group'
+        azureResourceManagerConnection: 'azure-connection'
+        subscriptionId: '4b72ed90-7ca3-4e76-8d0f-31a2c0bee7a3'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(ResourceGroupName)'
+        location: 'West Europe'
+        templateLocation: 'Linked artifact'
+        csmFile: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.json'
+        csmParametersFile: '$(System.DefaultWorkingDirectory)/arm/WebSiteSQLDatabase.parameters.json'
+        overrideParameters: '-hostingPlanName $(hostingPlanName) -skuName "F1" -skuCapacity 1 -administratorLogin $(Database.Admin) -administratorLoginPassword $(Database.Password) -databaseName $(Database.Name) -collation "SQL_Latin1_General_CP1_CI_AS" -edition "Basic" -maxSizeBytes "1073741824" -requestedServiceObjectiveName "Basic" -webSiteName $(WebAppName) -sqlserverName $(SqlServerName)'
+        deploymentMode: 'Complete'
+>>>>>>> 92951185cea91f5e7d68da3ad5181df465f0d653:azure-pipelines.yml
 
-  - job: deployAzure
-    displayName: deploy bicep to Azure
+    - task: AzSKSVTs@4
+      displayName: Scan Azure Resources
+      enabled: ${{ parameters.runCompletePipeline }}
+      continueOnError: true
+      inputs:
+        ConnectedServiceNameARM: 'azure-connection'
+        GenerateMethodParameterSetSelection: 'ResourceGroupName'
+        ResourceGroupName: '$(ResourceGroupName)'
+        SubscriptionId: '4b72ed90-7ca3-4e76-8d0f-31a2c0bee7a3'
+        EnableGSSscan: true
+
+  - job: Deploy_DEV
+    displayName: Deploy Apps to DEV
+    dependsOn: Create_DEV
     pool:
-      vmImage: 'ubuntu-latest'
-    dependsOn: [waitForValidation]
-
+      vmImage: 'windows-2019'
     steps:
-    - task: AzureCLI@2
-      displayName: Deploy Bicep To Azure
+
+    - checkout: none
+# new JOB: Deploy App & Database
+    - task: DownloadBuildArtifacts@0    
+      displayName: Download WebApp.zip
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        itemPattern: '**/WebApp.zip'
+        downloadPath: '$(System.DefaultWorkingDirectory)'
+
+    - task: AzureRmWebAppDeployment@3
+      displayName: Deploy WebApp to Azure
       inputs:
         azureSubscription: 'azure-connection'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          az deployment group create --resource-group $(resourceGroupName) \
-            --template-file $(templateFile) \
-            --parameters webAppName=$(webAppName)
+        appType: 'app'
+        WebAppName: '$(WebAppName)'
+        Package: '$(System.DefaultWorkingDirectory)/drop/WebApp.zip'
+        TakeAppOfflineFlag: true
+        JSONFiles: '**/appsettings.json'
+
+    - task: DownloadBuildArtifacts@0    
+      displayName: Download DacPac
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'dacpac'
+        itemPattern: '**/*.dacpac'
+        downloadPath: '$(System.DefaultWorkingDirectory)'
+
+    - task: SqlAzureDacpacDeployment@1
+      displayName: Deploy DacPac to SQL Azure
+      inputs:
+        azureSubscription: 'azure-connection'
+        AuthenticationType: 'server'
+        ServerName: '$(SqlServerName).database.windows.net,1433'
+        DatabaseName: '$(Database.Name)'
+        SqlUsername: '$(Database.Admin)'
+        SqlPassword: '$(Database.Password)'
+        deployType: 'DacpacTask'
+        DeploymentAction: 'Publish'
+        DacpacFile: '$(System.DefaultWorkingDirectory)/dacpac/WebApp.Database.dacpac'
+        IpDetectionMethod: 'AutoDetect'
+# new JOB: Selenium
+  - job: Test_DEV
+    displayName: Run Selenium tests in DEV
+    dependsOn: Deploy_DEV
+    pool:
+      vmImage: 'windows-2019'
+    steps:
+
+    - checkout: none
+    - task: DownloadBuildArtifacts@0    
+      displayName: Download Selenium Tests
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'ui-tests'
+        itemPattern: ''
+        downloadPath: '$(System.DefaultWorkingDirectory)'
+
+    - task: VSTest@2
+      displayName: Run Selenium UI Tests
+      inputs:
+        testSelector: 'testAssemblies'
+        searchFolder: '$(System.DefaultWorkingDirectory)/ui-tests'
+        runSettingsFile: '$(System.DefaultWorkingDirectory)/ui-tests/.runsettings'
+        overrideTestrunParameters: '-webAppUrl $(WebAppNameUrl)'
+        testAssemblyVer2: |
+          **\*Test*.dll 
+          !**\*TestAdapter.dll 
+          !**\obj\**
+        runInParallel: false
+        codeCoverageEnabled: true
+
+
+- stage: Test_Stage
+  displayName: Test Stage
+  jobs:
+  - job:
+    displayName: Deploy to Test
+    steps:
+      - task: CmdLine@2
+        inputs:
+          script: 'ls'
+          
+- stage: Prod_Stage
+  displayName: Prod Stage
+  jobs:
+  - job:
+    displayName: Deploy to Prod
+    steps:
+      - task: CmdLine@2
+        inputs:
+          script: 'ls'
