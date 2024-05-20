@@ -4,10 +4,10 @@ trigger:
 - main
 
 variables:
-  resourceGroupName: 'rg-bicep-demo-0023'
+  resourceGroupName: 'rg-bicep-demo-00230'
   location: 'eastus'
-  webAppName: 'bicep0023'
-  templateFile: 'myFile.bicep'
+  webAppName: 'bicep00230'
+  templateFile: '04azureBicepWebApp/webapp-linux.bicep'
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -62,9 +62,8 @@ stages:
     - task: ManualValidation@0
       timeoutInMinutes: 1440 # task times out in 1 day
       inputs:
-        notifyUsers: 'houssem.dellai@live.com'
+        notifyUsers: 'uchaudh3@binghamton.edu'
         instructions: 'Please validate the build $(Build.BuildId) configuration and resume'
-        onTimeout: 'resume'
 
   - job: deployAzure
     displayName: deploy bicep to Azure
