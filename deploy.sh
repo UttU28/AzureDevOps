@@ -4,7 +4,7 @@ az containerapp env create --name aca-environment --resource-group DevOpsRG --lo
 az containerapp create --name album-backend-api --resource-group DevOpsRG --environment aca-environment --image mcr.microsoft.com/azuredocs/containerapps-helloworld:latest --target-port 80 --ingress 'external'
 az group show --name DevOpsRG --query id -o tsv
 # Use the above data in the below, use RBAC to set the role as contributor for that suscription
-az ad sp create-for-rbac -n "spn-aca-azure-pipelines" --role Contributor --scope /subscriptions/fb03483b-eece-41f0-8fca-b16b9e75cb43
+az ad sp create-for-rbac -n "spn-aca-azure-pipelines" --role Contributor --scope /subscriptions/fb03483b-eece-41f0-8fca-b16b9e75cb43TCTCT
 
 # {
 #   "appId": "98b5470b-3433-41fe-ac3a-75efc00e45555560e",
