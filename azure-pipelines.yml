@@ -7,9 +7,6 @@ parameters:
   type: boolean
   default: true
 
-variables:
-  defaultWorkingDirectory: $(System.DefaultWorkingDirectory)/06WebAppWithDatabaseDemo
-
 stages:
 - stage: Build_Stage
   displayName: Build Apps
@@ -30,38 +27,36 @@ stages:
         packageType: sdk
         version: 6.0.x
         installationPath: $(Agent.ToolsDirectory)/dotnet
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Restore Nuget Packages
       inputs:
         command: restore
         projects: '**/WebApp.csproj'
-        workingDirectory: $(defaultWorkingDirectory)
     
     # - task: WhiteSource Bolt@20
     #   displayName: Scan Nuget Packages
     #   enabled: ${{ parameters.runCompletePipeline }}
 
-    - task: PowerShell@2
-      displayName: Prepare for Sonar Cloud
-      enabled: ${{ parameters.runCompletePipeline }}
-      inputs:
-        targetType: 'inline'
-        script: |
-          $paths = Get-ChildItem -include *.csproj -Recurse
-                foreach($pathobject in $paths) 
-                {
-                    $path = $pathobject.fullname
-                    $doc = New-Object System.Xml.XmlDocument
-                    $doc.Load($path)
-                    $child = $doc.CreateElement("ProjectGuid")
-                    $child.InnerText = [guid]::NewGuid().ToString().ToUpper()
-                    $node = $doc.SelectSingleNode("//Project/PropertyGroup")
-                    $node.AppendChild($child)
-                    $doc.Save($path)
-                }
-        workingDirectory: $(defaultWorkingDirectory)/WebApp
+    # - task: PowerShell@2
+    #   displayName: Prepare for Sonar Cloud
+    #   enabled: ${{ parameters.runCompletePipeline }}
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       $paths = Get-ChildItem -include *.csproj -Recurse
+    #             foreach($pathobject in $paths) 
+    #             {
+    #                 $path = $pathobject.fullname
+    #                 $doc = New-Object System.Xml.XmlDocument
+    #                 $doc.Load($path)
+    #                 $child = $doc.CreateElement("ProjectGuid")
+    #                 $child.InnerText = [guid]::NewGuid().ToString().ToUpper()
+    #                 $node = $doc.SelectSingleNode("//Project/PropertyGroup")
+    #                 $node.AppendChild($child)
+    #                 $doc.Save($path)
+    #             }
+    #     workingDirectory: $(defaultWorkingDirectory)/WebApp
 
     # - task: SonarCloudPrepare@1
     #   displayName: Prepare analysis on SonarCloud
@@ -77,7 +72,6 @@ stages:
       inputs:
         projects: '**/WebApp.csproj'
         arguments: '--configuration $(BuildConfiguration)'
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Run Unit Tests
@@ -86,7 +80,6 @@ stages:
         command: test
         projects: '**/*UnitTest*.csproj'
         arguments: '--configuration $(BuildConfiguration)'
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: DotNetCoreCLI@2
       displayName: Create WebApp.zip
@@ -95,7 +88,6 @@ stages:
         publishWebProjects: True
         arguments: '--configuration $(BuildConfiguration) --output $(build.artifactstagingdirectory)'
         zipAfterPublish: True
-        workingDirectory: $(defaultWorkingDirectory)
 
     # - task: SonarCloudAnalyze@1
     #   displayName: Run Code Analysis
@@ -108,7 +100,7 @@ stages:
     - task: PublishBuildArtifacts@1
       displayName: Publish Artifact (WebApp.zip)
       inputs:
-        PathtoPublish: '$(defaultWorkingDirectory)/$(build.artifactstagingdirectory)'
+        PathtoPublish: '$(build.artifactstagingdirectory)'
         ArtifactName: drop
 
   - job: Database
@@ -123,13 +115,11 @@ stages:
       inputs:
         solution: WebApp.Database/WebApp.Database.sqlproj
         msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Artifact (Dacpac)
       inputs:
         ArtifactName: dacpac
-        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Selenium
     displayName: Build UI Tests
@@ -145,20 +135,17 @@ stages:
       displayName: Restoore NuGet Packages
       inputs:
         restoreSolution: WebAppWithDatabase.sln
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: MSBuild@1
       displayName: Build SeleniumUiTests.csproj
       inputs:
         solution: SeleniumUiTests/SeleniumUiTests.csproj
         msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
-        workingDirectory: $(defaultWorkingDirectory)
 
     - task: PublishBuildArtifacts@1
       displayName: 'Publish Artifact: UI-Test'
       inputs:
         ArtifactName: ui-tests
-        workingDirectory: $(defaultWorkingDirectory)
 
   - job: Infrastructure
     displayName: Publish Infra files
